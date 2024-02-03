@@ -1,10 +1,7 @@
 package com.denver7074.reader.service;
 
-import com.denver7074.reader.domain.Ticket;
-import com.denver7074.reader.utils.Utils;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.AccessLevel;
 import lombok.RequiredArgsConstructor;
@@ -17,17 +14,22 @@ import java.time.Duration;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static com.denver7074.reader.utils.Utils.converter;
 import static java.lang.String.format;
 
 @Service
 @RequiredArgsConstructor
-@FieldDefaults(makeFinal = true, level = AccessLevel.PRIVATE)
+@FieldDefaults(level = AccessLevel.PRIVATE)
 public class CalculateService {
 
-    ObjectMapper objectMapper;
+    final ObjectMapper objectMapper;
+
+    Map<String, Duration> map = new HashMap<>();
+
 
     @PreDestroy
     @SneakyThrows
@@ -36,19 +38,23 @@ public class CalculateService {
                 .getResourceAsStream("tickets.json");
 
         JsonNode jsonNode = objectMapper.readTree(resourceAsStream).get("tickets");
-        List<Ticket> tickets = new ArrayList<>(jsonNode.size());
+        List<Double> tickets = new ArrayList<>(jsonNode.size());
         double average = 0;
         for (JsonNode j : jsonNode) {
             if (!j.get("origin_name").asText().equals("Владивосток")
                     || !j.get("destination_name").asText().equals("Тель-Авив")) continue;
-            Ticket ticket = calculate(j);
-            System.out.println(ticket);
-            average += ticket.getPrice();
-            tickets.add(ticket);
+            calculate(j);
+            double price = j.get("price").asDouble();
+            average += price;
+            tickets.add(price);
+        }
+        for (String c : map.keySet()) {
+            Duration duration = map.get(c);
+            System.out.println(format("Carrier: %s  time fly: %02d:%02d", c, duration.toHours(), duration.toMinutesPart()));
         }
         average = average / tickets.size();
         System.out.println(format("Average price: %s", average));
-        List<Double> list = tickets.stream().map(Ticket::getPrice).sorted().toList();
+        List<Double> list = tickets.stream().sorted().toList();
         double mediana = 0;
         int index = list.size() / 2;
         if (list.size() % 2 == 0) {
@@ -58,7 +64,7 @@ public class CalculateService {
         System.out.println(format("Difference %s", average - mediana));
     }
 
-    private Ticket calculate(JsonNode j) {
+    private void calculate(JsonNode j) {
         //дата и время отбытия
         StringBuilder departure = new StringBuilder();
         departure.append(j.get("departure_date").asText())
@@ -74,12 +80,13 @@ public class CalculateService {
 
         Duration duration = Duration.between(departureZoneTime, arrivalZoneTime);
         String carrier = j.get("carrier").asText();
-        double price = j.get("price").asDouble();
 
-        return new Ticket()
-                .setCarrier(carrier)
-                .setPrice(price)
-                .setDuration(duration);
+        if (map.containsKey(carrier)) {
+            Duration dur = map.get(carrier);
+            if (dur.compareTo(duration) > 0) {
+                map.put(carrier, dur);
+            }
+        } else map.put(carrier, duration);
     }
 
 
